@@ -3,7 +3,11 @@
 import os
 import json
 import sys
+import hashlib
+import hmac
+from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from datetime import datetime, timezone
 from types import SimpleNamespace
 import importlib
 
@@ -25,6 +29,15 @@ import simap_agent.main as main
 import simap_agent.slack_client as slack_client
 import simap_agent.simap_client as simap_client
 import simap_agent.enricher as enricher
+import simap_agent.posted_store as posted_store
+import simap_agent.relevance as relevance
+import simap_agent.slack_interaction as slack_interaction
+import simap_agent.feedback_store as feedback_store
+import simap_agent.detail_analysis as detail_analysis
+import simap_agent.analysis_report as analysis_report
+from simap_agent.analysis_queue import build_analysis_request
+from simap_analysis_worker import _parse_queue_message
+import slack_interaction as slack_http
 
 
 def test_format_slack_blocks_basic():
@@ -51,6 +64,20 @@ def test_format_slack_blocks_basic():
     assert "Projekt" in section_text
     assert "Engineering" in section_text
     assert "Fehlende Infos" not in section_text
+    assert "Fit:" in section_text
+    actions = next(b for b in blocks if b.get("type") == "actions")
+    assert [e["action_id"] for e in actions["elements"]] == [
+        slack_interaction.INTERESTING_ACTION_ID,
+        slack_interaction.NOT_INTERESTING_ACTION_ID,
+    ]
+    value = json.loads(actions["elements"][0]["value"])
+    assert value == {
+        "project_id": "abc",
+        "project_number": "123",
+        "offer_deadline": "2024-12-31",
+        "qna_deadline": "2024-12-01",
+        "contract_start": "2025-01-15",
+    }
 
 
 def test_format_slack_blocks_missing_info():
@@ -73,6 +100,293 @@ def test_format_slack_blocks_missing_info():
     blocks = slack_client.format_slack_blocks(proj)
     section_text = next(b for b in blocks if b.get("type") == "section")["text"]["text"]
     assert "Fehlende Infos" in section_text
+
+
+def test_format_slack_blocks_relevance_and_document_hints():
+    proj = {
+        "team": "Engineering",
+        "project": {
+            "title_de": "Workflow",
+            "customer": "Kunde",
+            "projectNumber": "123",
+            "projectId": "abc",
+            "cpvCode": {"code": "72000000", "label_de": "IT"},
+        },
+        "apply_score": 8,
+        "raw_apply_score": 7,
+        "score_adjustment": 1,
+        "recommendation": "Top-Fit",
+        "decision_note": "Starker Fit wegen Workflow.",
+        "fit_reason_labels": ["Workflow & Prozessautomatisierung"],
+        "risk_labels": ["Vendor-Partnerstatus/Zertifizierung prüfen"],
+        "document_insights": ["Projektunterlagen auf SIMAP vorhanden"],
+        "summary": "Kurzfassung",
+        "missing_info": [],
+    }
+
+    blocks = slack_client.format_slack_blocks(proj)
+    section_text = next(b for b in blocks if b.get("type") == "section")["text"]["text"]
+
+    assert "Top-Fit" in section_text
+    assert "LLM" not in section_text
+    assert "Regel" not in section_text
+    assert "Workflow & Prozessautomatisierung" in section_text
+    assert "Projektunterlagen auf SIMAP vorhanden" in section_text
+    assert "Vendor-Partnerstatus" in section_text
+
+
+def test_verify_slack_signature_accepts_valid_request():
+    body = b'payload={"type":"block_actions"}'
+    timestamp = "1700000000"
+    secret = "secret"
+    base = b"v0:" + timestamp.encode("utf-8") + b":" + body
+    signature = "v0=" + hmac.new(
+        secret.encode("utf-8"),
+        base,
+        hashlib.sha256,
+    ).hexdigest()
+
+    assert slack_interaction.verify_slack_signature(
+        body,
+        timestamp,
+        signature,
+        signing_secret=secret,
+        now=1700000000,
+    )
+
+
+def test_parse_interaction_payload_extracts_action_and_project():
+    payload = {
+        "actions": [
+            {
+                "action_id": slack_interaction.INTERESTING_ACTION_ID,
+                "value": json.dumps({"project_id": "abc", "project_number": "123"}),
+            }
+        ],
+        "user": {"id": "U1"},
+        "channel": {"id": "C1"},
+    }
+    body = ("payload=" + quote(json.dumps(payload))).encode("utf-8")
+
+    result = slack_interaction.parse_interaction_payload(body)
+
+    assert result["action_id"] == slack_interaction.INTERESTING_ACTION_ID
+    assert result["project"] == {"project_id": "abc", "project_number": "123"}
+    assert result["user"] == {"id": "U1"}
+
+
+def test_interaction_ack_text_mentions_decision():
+    text = slack_interaction.interaction_ack_text(
+        slack_interaction.NOT_INTERESTING_ACTION_ID,
+        {"project_number": "123"},
+    )
+
+    assert "nicht interessant" in text
+    assert "#123" in text
+
+
+def test_feedback_store_writes_local_jsonl(monkeypatch, tmp_path):
+    feedback_file = tmp_path / "feedback.jsonl"
+    monkeypatch.setenv("SIMAP_FEEDBACK_FILE", str(feedback_file))
+    interaction = {
+        "action_id": slack_interaction.INTERESTING_ACTION_ID,
+        "project": {"project_id": "abc", "project_number": "123"},
+        "user": {"id": "U1", "username": "lukas"},
+        "channel": {"id": "C1"},
+        "message": {"ts": "1700000000.000100"},
+    }
+
+    record = feedback_store.build_feedback_record(interaction)
+    feedback_store.save_feedback_record(record)
+
+    saved = json.loads(feedback_file.read_text(encoding="utf-8"))
+    assert saved["event_type"] == "interesting"
+    assert saved["project_id"] == "abc"
+    assert saved["slack_user_id"] == "U1"
+
+
+def test_analysis_prompt_contains_start_analysis_button():
+    payload = slack_interaction._analysis_prompt_payload(
+        "C1",
+        "1700000000.000100",
+        "U1",
+        {"project_id": "abc", "project_number": "123"},
+    )
+
+    assert payload["thread_ts"] == "1700000000.000100"
+    action = payload["blocks"][1]["elements"][0]
+    assert action["action_id"] == slack_interaction.START_ANALYSIS_ACTION_ID
+    assert json.loads(action["value"]) == {"project_id": "abc", "project_number": "123"}
+
+
+def test_build_analysis_request_contains_thread_context():
+    interaction = {
+        "project": {
+            "project_id": "abc",
+            "project_number": "123",
+            "offer_deadline": "2024-12-31",
+            "qna_deadline": "2024-12-01",
+            "contract_start": "2025-01-15",
+        },
+        "user": {"id": "U1"},
+        "channel": {"id": "C1", "name": "simap"},
+        "message": {"ts": "1700000001.000200", "thread_ts": "1700000000.000100"},
+    }
+
+    message = build_analysis_request(interaction)
+
+    assert message["project_id"] == "abc"
+    assert message["project_number"] == "123"
+    assert message["offer_deadline"] == "2024-12-31"
+    assert message["qna_deadline"] == "2024-12-01"
+    assert message["contract_start"] == "2025-01-15"
+    assert message["slack_channel_id"] == "C1"
+    assert message["slack_thread_ts"] == "1700000000.000100"
+    assert message["slack_message_ts"] == "1700000001.000200"
+
+
+def test_build_analysis_request_uses_origin_thread_context_from_button_value():
+    interaction = {
+        "project": {
+            "project_id": "abc",
+            "project_number": "123",
+            "_origin_channel_id": "C1",
+            "_origin_thread_ts": "1700000000.000100",
+        },
+        "user": {"id": "U1"},
+        "channel": {},
+        "message": {"ts": "1700000002.000300"},
+    }
+
+    message = build_analysis_request(interaction)
+
+    assert message["slack_channel_id"] == "C1"
+    assert message["slack_thread_ts"] == "1700000000.000100"
+    assert message["slack_message_ts"] == "1700000002.000300"
+
+
+def test_update_analysis_request_message_removes_buttons(monkeypatch):
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setattr(detail_analysis.requests, "post", fake_post)
+
+    updated = detail_analysis.update_analysis_request_message(
+        {
+            "project_number": "123",
+            "slack_channel_id": "C1",
+            "slack_message_ts": "1700000001.000200",
+        },
+        analysis_posted=True,
+    )
+
+    assert updated is True
+    assert calls[0]["url"] == "https://slack.com/api/chat.update"
+    assert calls[0]["json"]["ts"] == "1700000001.000200"
+    assert calls[0]["json"]["blocks"][0]["type"] == "section"
+    assert "actions" not in {block.get("type") for block in calls[0]["json"]["blocks"]}
+
+
+def test_analysis_worker_parses_plain_or_base64_queue_message():
+    payload = {"project_id": "abc", "slack_thread_ts": "1.2"}
+
+    class Message:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def get_body(self):
+            return self.body
+
+    assert _parse_queue_message(Message(json.dumps(payload).encode("utf-8"))) == payload
+    encoded = __import__("base64").b64encode(json.dumps(payload).encode("utf-8"))
+    assert _parse_queue_message(Message(encoded)) == payload
+
+
+def test_slack_http_queues_interesting_event(monkeypatch):
+    interaction = {
+        "action_id": slack_interaction.INTERESTING_ACTION_ID,
+        "project": {"project_id": "abc", "project_number": "123"},
+        "user": {"id": "U1"},
+        "channel": {"id": "C1"},
+        "message": {"ts": "1.2"},
+    }
+
+    class Request:
+        headers = {}
+
+        def get_body(self):
+            return b"body"
+
+    class Out:
+        def __init__(self):
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+    monkeypatch.setattr(slack_http, "verify_slack_signature", lambda *args, **kwargs: True)
+    monkeypatch.setattr(slack_http, "parse_interaction_payload", lambda body: interaction)
+    interaction_event = Out()
+    analysis_request = Out()
+
+    response = slack_http.main(Request(), interaction_event, analysis_request)
+
+    assert response.status_code == 200
+    assert json.loads(interaction_event.value)["action_id"] == slack_interaction.INTERESTING_ACTION_ID
+    assert analysis_request.value is None
+
+
+def test_slack_http_queues_start_analysis_request(monkeypatch):
+    interaction = {
+        "action_id": slack_interaction.START_ANALYSIS_ACTION_ID,
+        "project": {
+            "project_id": "abc",
+            "project_number": "123",
+            "_origin_channel_id": "C1",
+            "_origin_thread_ts": "1.2",
+        },
+        "user": {"id": "U1"},
+        "channel": {},
+        "message": {"ts": "2.3"},
+    }
+
+    class Request:
+        headers = {}
+
+        def get_body(self):
+            return b"body"
+
+    class Out:
+        def __init__(self):
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+    monkeypatch.setattr(slack_http, "verify_slack_signature", lambda *args, **kwargs: True)
+    monkeypatch.setattr(slack_http, "parse_interaction_payload", lambda body: interaction)
+    interaction_event = Out()
+    analysis_request = Out()
+
+    response = slack_http.main(Request(), interaction_event, analysis_request)
+
+    queued = json.loads(analysis_request.value)
+    assert response.status_code == 200
+    assert interaction_event.value is None
+    assert queued["project_id"] == "abc"
+    assert queued["slack_channel_id"] == "C1"
+    assert queued["slack_thread_ts"] == "1.2"
 
 
 def test_enrich_missing_info(monkeypatch):
@@ -124,6 +438,63 @@ def test_enrich_missing_info(monkeypatch):
         "Q&A",
         "Zuschlagskriterien",
     ]
+    assert result["raw_apply_score"] == 5
+
+
+def test_build_document_insights_from_simap_flags():
+    detail = {
+        "hasProjectDocuments": True,
+        "criteria": {
+            "qualificationCriteriaSelection": "criteria_in_documents",
+            "awardCriteriaSelection": "criteria_in_documents",
+        },
+    }
+    data = {
+        "qualificationCriteriaInDocuments": True,
+        "awardCriteriaAsPDF": True,
+        "qualificationCriteria": [{"title": {"de": "Referenzen"}}],
+        "awardCriteria": [{"title": {"de": "Preis"}}],
+    }
+
+    insights = enricher._build_document_insights(detail, data)
+
+    assert "Projektunterlagen auf SIMAP vorhanden" in insights
+    assert "Eignungskriterien liegen in den Unterlagen" in insights
+    assert "Zuschlagskriterien liegen als PDF vor" in insights
+    assert "1 Eignungskriterien direkt extrahiert" in insights
+
+
+def test_relevance_adjustment_penalizes_license_support_procurement():
+    detail = {
+        "title": {"de": "Red Hat Subscription/Wartung und Support"},
+        "description": {
+            "de": "Beschaffung von Lizenzen, Wartung und Support. Anbieterin benoetigt Premier tier Partner Status."
+        },
+    }
+    enriched = {"apply_score": 7, "summary": "Reine Subscription-Beschaffung"}
+
+    result = relevance.apply_relevance_adjustment(detail, enriched)
+
+    assert result["apply_score"] < 7
+    assert "Pure license/subscription procurement" in result["disqualifiers"]
+    assert "Operations/support-heavy scope" in result["disqualifiers"]
+    assert "Vendor partner requirement" in result["disqualifiers"]
+
+
+def test_relevance_adjustment_boosts_mesoneer_core_scope():
+    detail = {
+        "title": {"de": "Digitaler Schaden-Workflow"},
+        "description": {
+            "de": "Entwicklung und Integration eines Workflow mit Schnittstellen, Datenplattform und API."
+        },
+    }
+    enriched = {"apply_score": 6, "summary": "Workflow- und Integrationsprojekt"}
+
+    result = relevance.apply_relevance_adjustment(detail, enriched)
+
+    assert result["apply_score"] > 6
+    assert "Workflow/process automation" in result["fit_reasons"]
+    assert "Custom engineering/integration" in result["fit_reasons"]
 
 
 def test_fetch_project_summaries_pagination(monkeypatch):
@@ -173,12 +544,16 @@ def test_fetch_project_details_filters(monkeypatch):
         projectId="3", publicationId="p3"
     )
     assert called == [exp1, exp2]
-    assert result == [{"endpoint": exp1}, {"endpoint": exp2}]
+    assert result == [
+        {"endpoint": exp1, "_simap_project_id": "1", "_simap_publication_id": "p1"},
+        {"endpoint": exp2, "_simap_project_id": "3", "_simap_publication_id": "p3"},
+    ]
 
 
 def test_main_filters_apply_score(monkeypatch):
     calls = []
 
+    monkeypatch.setattr(main.config, "POST_BELOW_THRESHOLD", False)
     monkeypatch.setattr(main, "fetch_project_summaries", lambda cpv=None: ["s"])
     monkeypatch.setattr(
         main,
@@ -202,4 +577,226 @@ def test_main_filters_apply_score(monkeypatch):
     main.main()
 
     assert len(calls) == 1
+
+
+def test_main_can_post_below_threshold_in_test_mode(monkeypatch, tmp_path):
+    calls = []
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(tmp_path / "posted.json"))
+    monkeypatch.setattr(main.config, "POST_BELOW_THRESHOLD", True)
+    monkeypatch.setattr(main, "fetch_project_summaries", lambda cpv=None: [{"id": "1"}])
+    monkeypatch.setattr(main, "fetch_project_details", lambda summaries: [{"projectNumber": "1"}])
+    monkeypatch.setattr(
+        main,
+        "enrich_batch",
+        lambda details, profile: [{"apply_score": 1, "project": {"projectNumber": "1"}}],
+    )
+    monkeypatch.setattr(main, "format_slack_blocks", lambda data: [])
+    monkeypatch.setattr(main, "post_blocks", lambda blocks: calls.append(blocks))
+
+    main.main()
+
+    assert len(calls) == 1
+
+
+def test_main_skips_already_posted_summary(monkeypatch, tmp_path):
+    posted_file = tmp_path / "posted_projects.json"
+    posted_store.save_posted_keys(str(posted_file), {"1"})
+    fetched = []
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(posted_file))
+    monkeypatch.setattr(main.config, "REPOST_ALREADY_POSTED", False)
+    monkeypatch.setattr(
+        main,
+        "fetch_project_summaries",
+        lambda cpv=None: [
+            {"id": "1", "publicationId": "p1"},
+            {"id": "2", "publicationId": "p2"},
+        ],
+    )
+    monkeypatch.setattr(main, "fetch_project_details", lambda summaries: fetched.extend(summaries) or [])
+    monkeypatch.setattr(main, "enrich_batch", lambda details, profile: [])
+
+    main.main()
+
+    assert fetched == [{"id": "2", "publicationId": "p2"}]
+
+
+def test_main_can_repost_already_posted_summary(monkeypatch, tmp_path):
+    posted_file = tmp_path / "posted_projects.json"
+    posted_store.save_posted_keys(str(posted_file), {"1"})
+    fetched = []
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(posted_file))
+    monkeypatch.setattr(main.config, "REPOST_ALREADY_POSTED", True)
+    monkeypatch.setattr(
+        main,
+        "fetch_project_summaries",
+        lambda cpv=None: [
+            {"id": "1", "publicationId": "p1"},
+            {"id": "2", "publicationId": "p2"},
+        ],
+    )
+    monkeypatch.setattr(main, "fetch_project_details", lambda summaries: fetched.extend(summaries) or [])
+    monkeypatch.setattr(main, "enrich_batch", lambda details, profile: [])
+
+    main.main()
+
+    assert fetched == [
+        {"id": "1", "publicationId": "p1"},
+        {"id": "2", "publicationId": "p2"},
+    ]
+
+
+def test_main_marks_successfully_posted_publication(monkeypatch, tmp_path):
+    posted_file = tmp_path / "posted_projects.json"
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(posted_file))
+    monkeypatch.setattr(main, "fetch_project_summaries", lambda cpv=None: [{"id": "1", "publicationId": "p1"}])
+    monkeypatch.setattr(
+        main,
+        "fetch_project_details",
+        lambda summaries: [{"projectNumber": "1", "_simap_project_id": "1", "_simap_publication_id": "p1"}],
+    )
+    monkeypatch.setattr(
+        main,
+        "enrich_batch",
+        lambda details, profile: [{"apply_score": 8, "project": {"projectNumber": "1"}}],
+    )
+    monkeypatch.setattr(main, "format_slack_blocks", lambda data: [])
+    monkeypatch.setattr(main, "post_blocks", lambda blocks: None)
+
+    main.main()
+
+    assert posted_store.load_posted_keys(str(posted_file)) == {"1"}
+
+
+def test_main_can_deduplicate_by_publication(monkeypatch, tmp_path):
+    posted_file = tmp_path / "posted_projects.json"
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(posted_file))
+    monkeypatch.setattr(main.config, "DEDUPLICATION_SCOPE", "publication")
+    monkeypatch.setattr(main, "fetch_project_summaries", lambda cpv=None: [{"id": "1", "publicationId": "p1"}])
+    monkeypatch.setattr(
+        main,
+        "fetch_project_details",
+        lambda summaries: [{"projectNumber": "1", "_simap_project_id": "1", "_simap_publication_id": "p1"}],
+    )
+    monkeypatch.setattr(
+        main,
+        "enrich_batch",
+        lambda details, profile: [{"apply_score": 8, "project": {"projectNumber": "1"}}],
+    )
+    monkeypatch.setattr(main, "format_slack_blocks", lambda data: [])
+    monkeypatch.setattr(main, "post_blocks", lambda blocks: None)
+
+    main.main()
+
+    assert posted_store.load_posted_keys(str(posted_file)) == {"1:p1"}
+
+
+def test_posted_store_prunes_entries_older_than_retention():
+    entries = {
+        "old": "2024-12-31T00:00:00+00:00",
+        "fresh": "2025-12-31T00:00:00+00:00",
+        "legacy-without-date": None,
+    }
+
+    result = posted_store.prune_posted_entries(
+        entries,
+        retention_days=365,
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert result == {
+        "fresh": "2025-12-31T00:00:00+00:00",
+        "legacy-without-date": None,
+    }
+
+
+def test_detail_analysis_prompt_includes_internal_reference_pack(tmp_path, monkeypatch):
+    reference_pack = tmp_path / "internal_reference_pack.md"
+    reference_pack.write_text(
+        "# Internal Reference Pack\n\n## Customer And Project References\n- Reference Alpha",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "INTERNAL_REFERENCE_PACK_FILE", str(reference_pack))
+    prompt = detail_analysis._build_analysis_prompt(
+        {"project_id": "abc"},
+        detail_analysis._load_internal_reference_pack(),
+    )
+
+    assert "SCOTSMAN" in prompt
+    assert '"score"' in prompt
+    assert '"total_score"' in prompt
+    assert "Reference Alpha" in prompt
+
+
+def test_detail_analysis_request_metadata_falls_back_to_project_context(monkeypatch):
+    context = {
+        "detail": {"offerDeadline": "2026-07-21"},
+        "enriched": {
+            "project": {
+                "offerDeadline": "2026-07-22",
+                "qna_deadline": "2026-06-29",
+                "contract_start": "2028-01-01",
+            }
+        },
+    }
+    monkeypatch.setattr(detail_analysis, "load_project_context", lambda project_id: context)
+
+    request = detail_analysis._request_with_context_metadata(
+        {"project_id": "abc", "project_number": "123"}
+    )
+
+    assert request["offer_deadline"] == "2026-07-22"
+    assert request["qna_deadline"] == "2026-06-29"
+    assert request["contract_start"] == "2028-01-01"
+
+
+def test_analysis_report_renders_summary_and_html():
+    report = analysis_report.normalize_analysis(
+        {
+            "title": "SCOTSMAN Bid-Qualifizierung Test",
+            "decision": "NO-GO",
+            "total_score": 10,
+            "decision_reason": "Mehrere K.o.-Kriterien.",
+            "scorecard": [
+                {
+                    "letter": "S",
+                    "criterion": "Solution",
+                    "description": "Credible solution?",
+                    "score": 0,
+                    "risk": "sehr hoch",
+                    "comment": "Kein Fit.",
+                }
+            ],
+            "internal_evidence": ["Reference Alpha"],
+            "contacts": [{"name": "Nelli Arnold", "role": "Lead Sales", "reason": "Bid Check"}],
+            "next_steps": ["Bid stoppen."],
+        },
+        {
+            "offer_deadline": "2026-07-21",
+            "qna_deadline": "2026-06-29",
+            "contract_start": "2028-01-01",
+        },
+    )
+
+    summary = analysis_report.slack_summary_text(report, {"html_url": "https://example.com/report.html"})
+    html = analysis_report.render_html_report(report)
+
+    assert "*SCOTSMAN:* NO-GO - 10/32" in summary
+    assert "HTML Report" in summary
+    assert "fonts.googleapis.com/css2?family=Open+Sans" in html
+    assert "linear-gradient(315deg,#2E1A47" in html
+    assert "class=\"decision risk\"" in html
+    assert "Q&amp;A bis: 29.06.2026" in html
+    assert "Frist Einreichung: 21.07.2026" in html
+    assert "Start: 01.01.2028" in html
+    assert "SCOTSMAN-Bewertung" in html
+    assert "Score (0-4)" in html
+    assert "class=\"chip s-risk\">0</span>" in html
+    assert "Reference Alpha" in html
+    assert "<th style=\"width:200px\">Person</th>" in html
 

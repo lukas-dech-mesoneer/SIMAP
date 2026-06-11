@@ -76,6 +76,8 @@ def fetch_project_details(summaries: List[Dict[str, Any]]) -> List[Dict[str, Any
         endpoint = config.SIMAP_DETAIL_ENDPOINT_TEMPLATE.format(projectId=pid, publicationId=pub)
         data = call(endpoint)
         if data:
+            data.setdefault("_simap_project_id", pid)
+            data.setdefault("_simap_publication_id", pub)
             details.append(data)
         else:
             logger.warning("No detail returned for project %s", pid)

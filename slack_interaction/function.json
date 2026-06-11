@@ -1,0 +1,32 @@
+{
+  "scriptFile": "__init__.py",
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["post"],
+      "route": "slack-interaction"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "interactionEvent",
+      "queueName": "simap-interaction-events",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "analysisRequest",
+      "queueName": "simap-analysis-requests",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
+}

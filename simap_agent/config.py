@@ -32,12 +32,39 @@ AZURE_OPENAI_ENDPOINT = os.getenv(
     "https://dataai-opai-openai-weu-001.cognitiveservices.azure.com/",
 )
 
-
-OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "2025-01-01-preview")
+#2025-01-01-preview
+OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_OPENAI_DEPLOYMENT = os.getenv(
+    "AZURE_OPENAI_DEPLOYMENT",
+    os.getenv("OPENAI_MODEL", "gpt-5"),
+)
 COMPANY_PROFILE_FILE = os.getenv("COMPANY_PROFILE_FILE", "company_profile.json")
+INTERNAL_REFERENCE_PACK_FILE = os.getenv(
+    "INTERNAL_REFERENCE_PACK_FILE", "internal_reference_pack.md"
+)
 CPV_CODES = os.getenv("CPV_CODES", "48000000,72000000").split(",")
 # Minimum apply score required for posting a project to Slack
-APPLY_SCORE_THRESHOLD = int(os.getenv("APPLY_SCORE_THRESHOLD", "7"))
+APPLY_SCORE_THRESHOLD = int(os.getenv("APPLY_SCORE_THRESHOLD", "6"))
+_default_posted_projects_file = "posted_projects.json"
+if os.getenv("FUNCTIONS_WORKER_RUNTIME") and os.getenv("HOME"):
+    _default_posted_projects_file = os.path.join(
+        os.getenv("HOME", ""), "data", "posted_projects.json"
+    )
+POSTED_PROJECTS_FILE = os.getenv("POSTED_PROJECTS_FILE", _default_posted_projects_file)
+DEDUPLICATION_SCOPE = os.getenv("DEDUPLICATION_SCOPE", "project")
+POSTED_PROJECTS_RETENTION_DAYS = int(os.getenv("POSTED_PROJECTS_RETENTION_DAYS", "365"))
+REPOST_ALREADY_POSTED = os.getenv("REPOST_ALREADY_POSTED", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+POST_BELOW_THRESHOLD = os.getenv("POST_BELOW_THRESHOLD", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 logger.debug("Slack webhook configured: %s", bool(SLACK_WEBHOOK_URL))
 
 try:

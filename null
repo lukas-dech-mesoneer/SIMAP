@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<publishData>
+  <publishProfile profileName="dataai-func-weu-001 - Web Deploy" publishMethod="MSDeploy" publishUrl="dataai-func-weu-001.scm.azurewebsites.net:443" msdeploySite="dataai-func-weu-001" userName="$dataai-func-weu-001" userPWD="GZHqhyw9jAo2ACbm1eP8gMYegoxNsD7pN4tMqDj7QTvnZa4MumpZ11ellsbR" destinationAppUrl="https://dataai-func-weu-001.azurewebsites.net" SQLServerDBConnectionString="" mySQLDBConnectionString="" hostingProviderForumLink="" controlPanelLink="https://portal.azure.com" webSystem="WebSites">
+    <databases />
+  </publishProfile>
+  <publishProfile profileName="dataai-func-weu-001 - FTP" publishMethod="FTP" publishUrl="ftps://waws-prod-am2-795.ftp.azurewebsites.windows.net/site/wwwroot" ftpPassiveMode="True" userName="REDACTED" userPWD="REDACTED" destinationAppUrl="https://dataai-func-weu-001.azurewebsites.net" SQLServerDBConnectionString="REDACTED" mySQLDBConnectionString="" hostingProviderForumLink="" controlPanelLink="https://portal.azure.com" webSystem="WebSites">
+    <databases />
+  </publishProfile>
+  <publishProfile profileName="dataai-func-weu-001 - Zip Deploy" publishMethod="ZipDeploy" publishUrl="dataai-func-weu-001.scm.azurewebsites.net:443" userName="$dataai-func-weu-001" userPWD="GZHqhyw9jAo2ACbm1eP8gMYegoxNsD7pN4tMqDj7QTvnZa4MumpZ11ellsbR" destinationAppUrl="https://dataai-func-weu-001.azurewebsites.net" SQLServerDBConnectionString="" mySQLDBConnectionString="" hostingProviderForumLink="" controlPanelLink="https://portal.azure.com" webSystem="WebSites">
+    <databases />
+  </publishProfile>
+</publishData>

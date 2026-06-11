@@ -3,4 +3,5 @@ __pycache__/
 .pytest_cache/
 *.ipynb
 enriched_projects.json
+posted_projects.json
 .venv/

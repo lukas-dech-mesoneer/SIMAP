@@ -2,3 +2,6 @@ python-dotenv
 openai
 requests
 azure-functions
+azure-storage-blob
+azure-storage-queue
+python-docx
