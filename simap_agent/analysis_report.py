@@ -33,6 +33,7 @@ def normalize_analysis(value: Any, request: dict[str, Any] | None = None) -> dic
             "internal_evidence": [],
             "contacts": [],
             "next_steps": ["Analyse manuell pruefen, da kein strukturiertes Resultat erzeugt wurde."],
+            "metadata": _metadata_from_request(request),
         }
 
     report = dict(value)
@@ -42,7 +43,7 @@ def normalize_analysis(value: Any, request: dict[str, Any] | None = None) -> dic
     report.setdefault("internal_evidence", [])
     report.setdefault("contacts", [])
     report.setdefault("next_steps", [])
-    report.setdefault("metadata", _metadata_from_request(request))
+    report["metadata"] = _merged_metadata(report.get("metadata"), request)
     if not report.get("title"):
         project_number = (request or {}).get("project_number") or (request or {}).get("project_id") or "unbekannt"
         report["title"] = f"SCOTSMAN Bid-Qualifizierung Projekt #{project_number}"
@@ -285,8 +286,20 @@ def _score_total(scorecard: Any) -> int:
 def _metadata_from_request(request: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(request, dict):
         return {}
-    keys = ["offer_deadline", "qna_deadline", "contract_start"]
-    return {key: request.get(key) for key in keys if request.get(key)}
+    return {
+        "offer_deadline": request.get("offer_deadline") or request.get("offerDeadline"),
+        "qna_deadline": request.get("qna_deadline"),
+        "contract_start": request.get("contract_start"),
+    }
+
+
+def _merged_metadata(value: Any, request: dict[str, Any] | None) -> dict[str, Any]:
+    metadata = dict(value) if isinstance(value, dict) else {}
+    request_metadata = _metadata_from_request(request)
+    for key, fallback in request_metadata.items():
+        if fallback and not metadata.get(key):
+            metadata[key] = fallback
+    return {key: value for key, value in metadata.items() if value}
 
 
 def _header_meta_items(report: dict[str, Any]) -> str:

@@ -1,6 +1,5 @@
 """Entry point for running the SIMAP pipeline."""
 
-import json
 import logging
 import os
 import sys
@@ -104,9 +103,6 @@ def main() -> None:
                 logger.exception("Slack post succeeded, but could not save posted key %s", key)
         logger.info("Slack post succeeded")
 
-#    logger.info("Writing enriched data to enriched_projects.json")
-#    with open("enriched_projects.json", "w", encoding="utf-8") as f:
-#        json.dump(enriched, f, ensure_ascii=False, indent=2)
     logger.info("Run completed")
 
 

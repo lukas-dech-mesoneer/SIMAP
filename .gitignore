@@ -4,4 +4,10 @@ __pycache__/
 *.ipynb
 enriched_projects.json
 posted_projects.json
+posted_projects*_test.json
+posted_projects_manual_*.json
+*.PublishSettings
+*.pubxml
+publishData*
+null
 .venv/

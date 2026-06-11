@@ -800,3 +800,26 @@ def test_analysis_report_renders_summary_and_html():
     assert "Reference Alpha" in html
     assert "<th style=\"width:200px\">Person</th>" in html
 
+
+def test_analysis_report_merges_empty_metadata_from_request():
+    report = analysis_report.normalize_analysis(
+        {
+            "title": "SCOTSMAN Bid-Qualifizierung Test",
+            "decision": "NO-GO",
+            "total_score": 11,
+            "decision_reason": "Klarer No-Fit.",
+            "metadata": {},
+        },
+        {
+            "offer_deadline": "2026-07-21",
+            "qna_deadline": "2026-06-29",
+            "contract_start": "2028-01-01",
+        },
+    )
+    html = analysis_report.render_html_report(report)
+
+    assert "Format: mesoneer CI" not in html
+    assert "Q&amp;A bis: 29.06.2026" in html
+    assert "Frist Einreichung: 21.07.2026" in html
+    assert "Start: 01.01.2028" in html
+
