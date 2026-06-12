@@ -2,6 +2,7 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List
 
 from openai import AzureOpenAI
@@ -15,6 +16,7 @@ openai_client = AzureOpenAI(
     api_key=config.OPENAI_API_KEY,
     azure_endpoint=config.AZURE_OPENAI_ENDPOINT,
     api_version=config.OPENAI_API_VERSION,
+    timeout=60.0,
 )
 
 
@@ -171,13 +173,20 @@ def enrich(detail: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
         "3-4 = schwacher Fit (Lizenz-/Subscription-Beschaffung, reine Wartung/Betrieb/Support)\n"
         "5   = unklar oder grenzwertig (Kriterien extern, Leistungsumfang nicht beurteilbar)\n"
         "6   = prüfenswert mit konkretem Entwicklungs- oder Integrationsanteil\n"
-        "7-8 = guter Fit (Softwareentwicklung, Workflow, Data/AI, digitale Identifikation klar beschrieben)\n"
-        "9-10 = sehr starker Fit mit mehreren nachgewiesenen Mesoneer-Staerken\n\n"
+        "7-8 = guter Fit (Softwareentwicklung, Workflow-Automatisierung, Data/AI, Digitalisierung klar beschrieben)\n"
+        "9-10 = sehr starker Fit mit mehreren nachgewiesenen Mesoneer-Kernkompetenzen\n\n"
+        "Mesoneer-Kernkompetenzen (Hinweis fuer Score 7+):\n"
+        "- Digital Trust: elektronische Signatur, eID, KYC, Onboarding, Identitaet\n"
+        "- Workflow/BPM: Prozessautomatisierung, Camunda, Axon Ivy, RPA, UiPath, Low-Code\n"
+        "- Data & AI: Datenplattform, Data Engineering, Datenarchitektur, KI-Anwendung, Anonymisierung\n"
+        "- Custom Engineering: Individualsoftware, Systemintegration, Fachapplikation, API-Integration\n"
+        "- Bevorzugte Branchen: Finanzdienstleistungen, Versicherung, Gesundheitswesen, öffentliche Verwaltung\n\n"
         "Strikte Regeln:\n"
-        "- Score 7+ nur wenn Entwicklung, Integration, Workflow/Data/AI oder digitale Identifikation als expliziter Leistungsbestandteil genannt ist.\n"
+        "- Score 7+ nur wenn mind. eine Kernkompetenz als expliziter Leistungsbestandteil beschrieben ist.\n"
         "- Sind Leistungsumfang, Eignungs- und Zuschlagskriterien nur in externen Unterlagen: max. Score 5.\n"
         "- Reine Lizenz-, Subscription-, Hardware-, Hosting-, Betriebs- oder Supportbeschaffungen: max. Score 4.\n"
         "- Vendor-Partnerstufen oder Zertifizierungen als Muss-Kriterium: Score reduzieren.\n"
+        "- Personalleasing oder reine Strategieberatung ohne Umsetzungsverantwortung: max. Score 3.\n"
         "Gib kurze fit_reasons und disqualifiers zur Score-Begruendung aus."
     )
     logger.debug("Calling OpenAI for project %s", detail.get("id"))
@@ -305,10 +314,22 @@ def enrich(detail: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     return apply_relevance_adjustment(detail, data)
 
 
-def enrich_batch(details: List[Dict[str, Any]], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Run :func:`enrich` for a list of project details."""
-    results = []
-    for d in details:
-        logger.info("Enriching project %s", d.get("id"))
-        results.append(enrich(d, profile))
-    return results
+def enrich_batch(details: List[Dict[str, Any]], profile: Dict[str, Any], max_workers: int = 3) -> List[Dict[str, Any]]:
+    """Run :func:`enrich` for a list of project details in parallel."""
+    results: List[Any] = [None] * len(details)
+
+    def _enrich_one(index: int, detail: Dict[str, Any]) -> tuple:
+        logger.info("Enriching project %s", detail.get("id"))
+        return index, enrich(detail, profile)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_enrich_one, i, d): i for i, d in enumerate(details)}
+        for future in as_completed(futures):
+            i = futures[future]
+            try:
+                idx, result = future.result()
+                results[idx] = result
+            except Exception:
+                logger.exception("Failed to enrich project %s — skipping", details[i].get("id"))
+
+    return [r for r in results if r is not None]

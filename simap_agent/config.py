@@ -25,6 +25,7 @@ SIMAP_DETAIL_ENDPOINT_TEMPLATE = os.getenv(
     "/api/publications/v1/project/{projectId}/publication-details/{publicationId}",
 )
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv(
     "AZURE_OPENAI_ENDPOINT",
@@ -41,7 +42,7 @@ INTERNAL_REFERENCE_PACK_FILE = os.getenv(
     "INTERNAL_REFERENCE_PACK_FILE", "internal_reference_pack.md"
 )
 CPV_CODES = os.getenv("CPV_CODES", "48000000,72000000").split(",")
-APPLY_SCORE_THRESHOLD = int(os.getenv("APPLY_SCORE_THRESHOLD", "6"))
+APPLY_SCORE_THRESHOLD = int(os.getenv("APPLY_SCORE_THRESHOLD", "7"))
 
 _default_posted_projects_file = "posted_projects.json"
 if os.getenv("FUNCTIONS_WORKER_RUNTIME"):
@@ -72,9 +73,10 @@ except FileNotFoundError:
     COMPANY_PROFILE = {}
 
 _required = {
-    "SLACK_WEBHOOK_URL": SLACK_WEBHOOK_URL,
     "OPENAI_API_KEY": OPENAI_API_KEY,
 }
+if not SLACK_CHANNEL_ID and not SLACK_WEBHOOK_URL:
+    _required["SLACK_CHANNEL_ID or SLACK_WEBHOOK_URL"] = None
 _missing = [key for key, value in _required.items() if not value]
 if _missing:
     raise EnvironmentError(f"Missing environment variables: {', '.join(_missing)}")

@@ -64,7 +64,8 @@ def test_format_slack_blocks_basic():
     assert "Projekt" in section_text
     assert "Engineering" in section_text
     assert "Fehlende Infos" not in section_text
-    assert "Fit:" in section_text
+    assert "7/10" in section_text
+    assert "Pruefen" in section_text
     actions = next(b for b in blocks if b.get("type") == "actions")
     assert [e["action_id"] for e in actions["elements"]] == [
         slack_interaction.INTERESTING_ACTION_ID,
@@ -99,7 +100,7 @@ def test_format_slack_blocks_missing_info():
     }
     blocks = slack_client.format_slack_blocks(proj)
     section_text = next(b for b in blocks if b.get("type") == "section")["text"]["text"]
-    assert "Fehlende Infos" in section_text
+    assert "Fehlend: Ort" in section_text
 
 
 def test_format_slack_blocks_relevance_and_document_hints():
@@ -216,7 +217,12 @@ def test_analysis_prompt_contains_start_analysis_button():
     assert payload["thread_ts"] == "1700000000.000100"
     action = payload["blocks"][1]["elements"][0]
     assert action["action_id"] == slack_interaction.START_ANALYSIS_ACTION_ID
-    assert json.loads(action["value"]) == {"project_id": "abc", "project_number": "123"}
+    assert json.loads(action["value"]) == {
+        "project_id": "abc",
+        "project_number": "123",
+        "_origin_channel_id": "C1",
+        "_origin_thread_ts": "1700000000.000100",
+    }
 
 
 def test_build_analysis_request_contains_thread_context():
@@ -495,6 +501,37 @@ def test_relevance_adjustment_boosts_mesoneer_core_scope():
     assert result["apply_score"] > 6
     assert "Workflow/process automation" in result["fit_reasons"]
     assert "Custom engineering/integration" in result["fit_reasons"]
+
+
+def test_relevance_caps_generic_industry_context_below_posting_threshold():
+    detail = {
+        "title": {"de": "IT-Dienstleistungen fuer Krankenkasse"},
+        "description": {"de": "Beratung und Betrieb einer bestehenden Standardsoftware."},
+    }
+    enriched = {"apply_score": 7, "summary": "Breite IT-Ausschreibung im Gesundheitswesen"}
+
+    result = relevance.apply_relevance_adjustment(detail, enriched)
+
+    assert result["apply_score"] < 7
+
+
+def test_relevance_caps_documents_only_scope_without_delivery_fit():
+    detail = {
+        "title": {"de": "Digitale Plattform"},
+        "criteria": {
+            "qualificationCriteriaSelection": "criteria_in_documents",
+            "awardCriteriaSelection": "criteria_in_documents",
+        },
+    }
+    enriched = {
+        "apply_score": 7,
+        "summary": "Leistungsumfang und Kriterien sind den Unterlagen zu entnehmen.",
+    }
+
+    result = relevance.apply_relevance_adjustment(detail, enriched)
+
+    assert result["apply_score"] <= 5
+    assert "Scope only in documents" in result["disqualifiers"]
 
 
 def test_fetch_project_summaries_pagination(monkeypatch):

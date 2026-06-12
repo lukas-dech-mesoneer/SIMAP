@@ -2,6 +2,7 @@
 
 import logging
 import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -79,7 +80,7 @@ def format_slack_blocks(proj: Dict[str, Any]) -> List[Dict[str, Any]]:
     fit_reasons = proj.get("fit_reason_labels") or []
     risk_labels = proj.get("risk_labels") or []
     document_insights = proj.get("document_insights") or []
-    recommendation = proj.get("recommendation") or "Pruefen"
+    recommendation = proj.get("recommendation") or "Prüfen"
 
     offer_dl = fmt_date(offer_dl_raw, "%d.%m.%Y")
     qa_dl = fmt_date(qa_dl_raw, "%d.%m.%Y")
@@ -171,48 +172,47 @@ def format_slack_blocks(proj: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _criteria_text(proj: Dict[str, Any]) -> str:
-    """Return criteria details only when actual items are available.
+    parts = []
 
-    Skips "see external docs" summaries — those are already captured in
-    document_insights on the main card. Only shows content when real
-    criteria items or a genuine summary are present.
-    """
-    text = ""
     qual_summary = proj.get("qualificationCriteriaSummary")
     qual = proj.get("qualificationCriteria") or []
 
-    if qual:
-        text += ":bookmark_tabs: *Eignungskriterien:*"
-        for criteria in qual:
-            title = (criteria.get("title") or {}).get("de")
-            if not title:
-                continue
-            desc = (criteria.get("description") or {}).get("de") or ""
-            text += f"\n- *{title}*"
-            if desc:
-                text += f" - {desc}"
-        text += "\n"
+    qual_lines = []
+    for c in qual:
+        title = (c.get("title") or {}).get("de")
+        if not title:
+            continue
+        desc = (c.get("description") or {}).get("de") or ""
+        line = f"- *{title}*"
+        if desc:
+            line += f" - {desc}"
+        qual_lines.append(line)
+
+    if qual_lines:
+        parts.append(":bookmark_tabs: *Eignungskriterien:*\n" + "\n".join(qual_lines))
     elif qual_summary and not _is_external_reference(qual_summary):
-        text += f"\n:bookmark_tabs: *Eignungskriterien:*\n{qual_summary}\n"
+        parts.append(f":bookmark_tabs: *Eignungskriterien:*\n{qual_summary}")
 
     award_summary = proj.get("awardCriteriaSummary")
     award = proj.get("awardCriteria") or []
 
-    if award:
-        text += ":trophy: *Zuschlagskriterien:*"
-        for criteria in award:
-            title = (criteria.get("title") or {}).get("de")
-            if not title:
-                continue
-            weight = criteria.get("weighting")
-            text += f"\n- *{title}*"
-            if weight is not None:
-                text += f" - Gewichtung {weight}%"
-        text += "\n"
-    elif award_summary and not _is_external_reference(award_summary):
-        text += f"\n:trophy: *Zuschlagskriterien:*\n{award_summary}\n"
+    award_lines = []
+    for c in award:
+        title = (c.get("title") or {}).get("de")
+        if not title:
+            continue
+        weight = c.get("weighting")
+        line = f"- *{title}*"
+        if weight is not None:
+            line += f" - Gewichtung {weight}%"
+        award_lines.append(line)
 
-    return text.strip()
+    if award_lines:
+        parts.append(":trophy: *Zuschlagskriterien:*\n" + "\n".join(award_lines))
+    elif award_summary and not _is_external_reference(award_summary):
+        parts.append(f":trophy: *Zuschlagskriterien:*\n{award_summary}")
+
+    return "\n\n".join(parts)
 
 
 def _is_external_reference(text: str) -> bool:
@@ -222,21 +222,52 @@ def _is_external_reference(text: str) -> bool:
 
 
 def post_blocks(blocks: List[Dict[str, Any]]) -> None:
-    """Send Slack message blocks."""
-    logger.debug("Sending Slack blocks")
-    fallback = ""
-    for block in blocks:
-        if block.get("type") == "section" and block.get("text"):
-            fallback = block["text"].get("text", "")
-            break
-    payload = {"text": fallback[:150], "blocks": blocks}
+    """Send Slack message blocks.
+
+    Uses chat.postMessage (bot token) when SLACK_CHANNEL_ID is configured — this
+    allows the message to be updated later (e.g. to remove buttons after a click).
+    Falls back to the incoming webhook when SLACK_CHANNEL_ID is absent.
+    """
+    token = os.getenv("SLACK_BOT_TOKEN")
+    channel_id = config.SLACK_CHANNEL_ID
+    if token and channel_id:
+        _post_blocks_bot(token, channel_id, blocks)
+    else:
+        _post_blocks_webhook(blocks)
+
+
+def _post_blocks_bot(token: str, channel_id: str, blocks: List[Dict[str, Any]]) -> None:
+    fallback = next(
+        (b["text"]["text"][:150] for b in blocks if b.get("type") == "section" and b.get("text")),
+        "",
+    )
+    payload = {"channel": channel_id, "text": fallback, "blocks": blocks, "unfurl_links": False, "unfurl_media": False}
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Slack chat.postMessage failed: {data.get('error')}")
+    logger.debug("Posted via bot token, ts=%s", data.get("ts"))
+
+
+def _post_blocks_webhook(blocks: List[Dict[str, Any]]) -> None:
+    fallback = next(
+        (b["text"]["text"][:150] for b in blocks if b.get("type") == "section" and b.get("text")),
+        "",
+    )
+    payload = {"text": fallback, "blocks": blocks}
     response = requests.post(
         config.SLACK_WEBHOOK_URL,
         json=payload,
         headers={"Content-Type": "application/json"},
         timeout=10,
     )
-    logger.debug("Slack response status: %s", response.status_code)
+    logger.debug("Slack webhook response status: %s", response.status_code)
     response.raise_for_status()
 
 

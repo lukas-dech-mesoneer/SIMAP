@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from simap_agent.azure_storage import append_jsonl
+from simap_agent.slack_interaction import (
+    INTERESTING_ACTION_ID,
+    NOT_INTERESTING_ACTION_ID,
+    START_ANALYSIS_ACTION_ID,
+)
 
 DEFAULT_CONTAINER = "simap-feedback"
 DEFAULT_BLOB = "feedback.jsonl"
@@ -56,10 +61,10 @@ def _append_local(path: str, record: dict[str, Any]) -> None:
 
 
 def _event_type(action_id: str | None) -> str:
-    if action_id == "simap_project_interesting":
+    if action_id == INTERESTING_ACTION_ID:
         return "interesting"
-    if action_id == "simap_project_not_interesting":
+    if action_id == NOT_INTERESTING_ACTION_ID:
         return "not_interesting"
-    if action_id == "simap_project_start_analysis":
+    if action_id == START_ANALYSIS_ACTION_ID:
         return "start_analysis"
     return "unknown"

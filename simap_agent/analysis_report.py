@@ -386,11 +386,6 @@ def _list_items(values: Any, fallback: list[str]) -> str:
     return "".join(f"<li>{escape(_item_text(value))}</li>" for value in values[:6])
 
 
-def _contact_items(values: Any) -> str:
-    contacts = _contacts_as_strings(values)
-    return _list_items(contacts, ["Keine belastbaren Ansprechpartner gefunden."])
-
-
 def _contact_rows(values: Any) -> str:
     if not isinstance(values, list) or not values:
         return '<tr><td colspan="3">Keine belastbaren Ansprechpartner gefunden.</td></tr>'

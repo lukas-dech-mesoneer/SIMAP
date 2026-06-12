@@ -103,7 +103,6 @@
     "financial services",
     "banking",
     "insurance",
-    "public administration",
     "healthcare",
     "regulated industries",
     "organizations with complex customer journeys or sensitive data"
@@ -113,6 +112,5 @@
     "score_7_8": "Good fit: meaningful engineering, integration, automation, data, AI, or architecture scope, even if not all domains match.",
     "score_5_6": "Possible fit: broad IT/digitalization project with some relevant signals but unclear implementation ownership or weak Mesoneer differentiation.",
     "score_1_4": "Weak fit: pure licenses, subscriptions, hardware, hosting, operations, support, scanning/archive logistics, or mandatory vendor partner status without a clear engineering scope."
-  },
-  "max_contract_value_eur": 10000000
+  }
 }

@@ -119,14 +119,6 @@ def post_thread_update(interaction: dict[str, Any]) -> bool:
             if user_id
             else "Dieses Projekt wurde als *nicht interessant* markiert.",
         )
-    elif action_id == START_ANALYSIS_ACTION_ID:
-        payload = _feedback_note_payload(
-            channel_id,
-            message_ts,
-            f"<@{user_id}> hat die Detailanalyse gestartet. Das dauert ca. 2-3 Minuten."
-            if user_id
-            else "Die Detailanalyse wurde gestartet. Das dauert ca. 2-3 Minuten.",
-        )
     else:
         logger.warning("Skipping Slack thread update for unsupported action_id=%s", action_id)
         return False
@@ -153,6 +145,9 @@ def _analysis_prompt_payload(
 ) -> dict[str, Any]:
     project_number = project.get("project_number") or project.get("project_id") or "unbekannt"
     actor = f"<@{user_id}>" if user_id else "Jemand"
+    button_project = dict(project)
+    button_project.setdefault("_origin_channel_id", channel_id)
+    button_project.setdefault("_origin_thread_ts", thread_ts)
     return {
         "channel": channel_id,
         "thread_ts": thread_ts,
@@ -173,7 +168,7 @@ def _analysis_prompt_payload(
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Analyse starten", "emoji": True},
                         "style": "primary",
-                        "value": json.dumps(project, separators=(",", ":")),
+                        "value": json.dumps(button_project, separators=(",", ":")),
                         "action_id": START_ANALYSIS_ACTION_ID,
                     }
                 ],

@@ -8,41 +8,59 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 
 REASON_LABELS = {
-    "Mesoneer core domain": "Digital Trust / Onboarding / Signatur",
+    "Mesoneer core domain": "Digital Trust / KYC / eSignatur",
     "Workflow/process automation": "Workflow & Prozessautomatisierung",
-    "Data/AI scope": "Daten, KI oder Analytics",
+    "Data/AI scope": "Daten, KI oder Datenarchitektur",
     "Custom engineering/integration": "Individualsoftware / Integration",
     "Cloud/software technology fit": "Technologie-Fit",
+    "Preferred industry context": "Bevorzugte Branche",
 }
 
 RISK_LABELS = {
     "Pure license/subscription procurement": "Lizenz-/Subscription-Fokus",
-    "Operations/support-heavy scope": "Betrieb/Wartung/Support stark",
+    "Operations/support-heavy scope": "Betrieb/Wartung-lastig",
     "Infrastructure/hardware scope": "Infrastruktur/Hardware-Fokus",
-    "Vendor partner requirement": "Vendor-Partnerstatus/Zertifizierung prüfen",
-    "Scanning/archive-only scope": "Scanning/Archivierung ohne klaren Software-Fit",
+    "Vendor partner requirement": "Vendor-Partnerstatus prüfen",
+    "Scanning/archive-only scope": "Scanning/Archivierung ohne Software-Fit",
+    "Staff leasing or generic consulting": "Personalleasing / reine Beratung",
+    "Scope only in documents": "Scope/Kriterien nur in Unterlagen",
 }
 
 
 POSITIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
     (
+        # Highly specific Mesoneer products and core capabilities.
+        # "signatur" and "onboarding" removed — too broad in German.
         "Mesoneer core domain",
         (
+            # Identity & KYC
             "kyc",
-            "onboarding",
             "identifikation",
-            "identitaet",
-            "elektronische signatur",
-            "signatur",
-            "digitale unterschrift",
-            "digital trust",
-            "trusted digital transaction",
-            "digitales onboarding",
             "digitale identifikation",
+            "identitaet",
             "autoident",
             "videoident",
             "qes",
             "e-id",
+            "eid",
+            # Electronic signature (specific forms only)
+            "elektronische signatur",
+            "e-signatur",
+            "qualifizierte signatur",
+            "digitale unterschrift",
+            "signaturloesung",
+            # Digital trust
+            "digital trust",
+            "trusted digital transaction",
+            "vertrauensdienste",
+            "digitale vertrauensdienste",
+            # Digital onboarding (specific)
+            "digitales onboarding",
+            "kundenonboarding",
+            "customer journey",
+            "digitale kundenjourneys",
+            "digitale kundenbeziehung",
+            # Digital credentials / smart data
             "digital credentials",
             "digitale nachweise",
             "smart data",
@@ -61,51 +79,70 @@ POSITIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
             "prozess automation",
             "dynamische formulare",
             "dynamische vertrage",
+            "dynamische vertraege",
             "dynamische verträge",
             "bpmn",
             "camunda",
             "axon ivy",
             "flowable",
             "rpa",
+            "uipath",
             "power automate",
+            "low-code",
+            "lowcode",
+            "no-code",
+            "nocode",
         ),
         3,
     ),
     (
+        # "analytics" removed — too broad (Excel dashboards also match).
         "Data/AI scope",
         (
             "datenplattform",
             "data platform",
             "data engineering",
+            "datenarchitektur",
+            "data architecture",
             "data streaming",
             "data governance",
-            "analytics",
             "machine learning",
             "genai",
             "kuenstliche intelligenz",
             "kunstliche intelligenz",
+            "kuenstlicher intelligenz",
             "künstliche intelligenz",
             "ki-anwendung",
             "ai-anwendung",
             "ki-agent",
             "ai agent",
+            "ki-gestützt",
+            "ki-basiert",
+            "anonymisierung",
+            "echtzeitdaten",
+            "echtzeit-daten",
+            "real-time data",
         ),
         3,
     ),
     (
+        # "entwicklung", "api", "plattform", "integration" removed — appear in nearly every IT tender.
+        # Use specific compound terms instead.
         "Custom engineering/integration",
         (
             "individualsoftware",
             "fachapplikation",
             "softwareentwicklung",
-            "entwicklung",
-            "integration",
+            "applikationsentwicklung",
             "systemintegration",
             "schnittstelle",
-            "api",
+            "schnittstellen",
             "api gateway",
-            "migration",
-            "plattform",
+            "api-integration",
+            "api-entwicklung",
+            "datenmigration",
+            "applikationsmigration",
+            "softwaremigration",
             "legacy",
             "modernisierung",
             "modernization",
@@ -113,11 +150,10 @@ POSITIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
         2,
     ),
     (
+        # Generic tech stack — only specific tools, not broad terms like "cloud", "java", "python".
         "Cloud/software technology fit",
         (
             "azure",
-            "python",
-            "java",
             "kafka",
             "kafka connect",
             "kafka streams",
@@ -126,9 +162,25 @@ POSITIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
             "cqrs",
             "event-driven",
             "ereignisgesteuert",
-            "cloud",
             "microservice",
-            "container",
+            "kubernetes",
+        ),
+        1,
+    ),
+    (
+        # Preferred client sectors give a small bonus — not a deal-maker but a tie-breaker.
+        # "versicherung" alone omitted — substring-matches boilerplate like "Versicherungsnachweis".
+        "Preferred industry context",
+        (
+            "finanzdienstleistungen",
+            "banken",
+            "versicherungsunternehmen",
+            "krankenversicherung",
+            "krankenkasse",
+            "gesundheitswesen",
+            "spital",
+            "klinik",
+            "regulierte branche",
         ),
         1,
     ),
@@ -147,18 +199,21 @@ NEGATIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
             "softwarepaket",
             "standardsoftware",
             "reseller",
+            "volumenlizenz",
         ),
         -3,
     ),
     (
+        # "support" removed — often a minor clause in otherwise valid projects.
+        # "scan" removed — "security scan" / "vulnerability scan" can be Mesoneer-relevant.
         "Operations/support-heavy scope",
         (
             "wartung",
-            "support",
             "betrieb",
             "managed service",
             "service desk",
             "hosting",
+            "servicevertrag",
         ),
         -2,
     ),
@@ -177,13 +232,14 @@ NEGATIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
         -3,
     ),
     (
+        # "zertifizierung" removed — ambiguous (digital certification processes can be Mesoneer-relevant).
+        # "autorisiert" removed — too rare and ambiguous.
         "Vendor partner requirement",
         (
             "partner status",
             "premier tier",
-            "zertifikat",
-            "zertifizierung",
-            "autorisiert",
+            "zertifikat als muss",
+            "partnerschaftsnachweis",
         ),
         -2,
     ),
@@ -191,10 +247,22 @@ NEGATIVE_SIGNALS: List[Tuple[str, Tuple[str, ...], int]] = [
         "Scanning/archive-only scope",
         (
             "scanning",
-            "scan",
             "archivierung",
             "akten",
             "physisches archiv",
+            "dokumentenlogistik",
+        ),
+        -2,
+    ),
+    (
+        "Staff leasing or generic consulting",
+        (
+            "personalleasing",
+            "personalvermittlung",
+            "arbeitnehmerueberlassung",
+            "zeitarbeit",
+            "ressourcenvermittlung",
+            "strategieberatung ohne umsetzung",
         ),
         -2,
     ),
@@ -253,9 +321,13 @@ def relevance_adjustment(detail: Dict[str, Any], enriched: Dict[str, Any]) -> Di
             disqualifiers.append(label)
             negative_adj += points
 
-    # Cap positive stacking at +6 so keyword abundance can't push a weak project to 10.
+    if _scope_only_in_documents(detail, enriched):
+        disqualifiers.append("Scope only in documents")
+        negative_adj -= 1
+
+    # Cap positive stacking at +4 so keyword abundance can't push a weak project to 10.
     # Negative signals are not capped — a clear no-go should always pull the score down.
-    adjustment = min(positive_adj, 6) + negative_adj
+    adjustment = min(positive_adj, 4) + negative_adj
 
     return {
         "score_adjustment": adjustment,
@@ -346,21 +418,41 @@ def _apply_caps(score: int, fit_reasons: List[str], disqualifiers: List[str]) ->
     disqualifier_set = set(disqualifiers)
     fit_reason_set = set(fit_reasons)
     has_strong_fit = bool(_STRONG_FIT_SIGNALS & fit_reason_set)
+    has_delivery_fit = bool(
+        {
+            "Mesoneer core domain",
+            "Workflow/process automation",
+            "Data/AI scope",
+        }
+        & fit_reason_set
+    )
+
+    if not has_strong_fit:
+        score = min(score, 6)
 
     # Procurement-only: cap at 5 even without operations signal.
     # Requires a concrete engineering/AI/core-domain signal to exceed this.
-    if "Pure license/subscription procurement" in disqualifier_set and not has_strong_fit:
-        score = min(score, 5)
+    if "Pure license/subscription procurement" in disqualifier_set:
+        score = min(score, 6 if has_delivery_fit else 4)
 
     # Procurement + operations with no engineering counter-signal: hard cap at 4.
     if {
         "Pure license/subscription procurement",
         "Operations/support-heavy scope",
-    }.issubset(disqualifier_set) and not has_strong_fit:
+    }.issubset(disqualifier_set):
         score = min(score, 4)
 
     if "Infrastructure/hardware scope" in disqualifier_set:
         score = min(score, 4)
+
+    if "Vendor partner requirement" in disqualifier_set and not has_delivery_fit:
+        score = min(score, 4)
+
+    if "Staff leasing or generic consulting" in disqualifier_set and not has_delivery_fit:
+        score = min(score, 5)
+
+    if "Scope only in documents" in disqualifier_set and not has_delivery_fit:
+        score = min(score, 5)
 
     if (
         "Scanning/archive-only scope" in disqualifier_set
@@ -370,3 +462,27 @@ def _apply_caps(score: int, fit_reasons: List[str], disqualifiers: List[str]) ->
         score = min(score, 5)
 
     return score
+
+
+def _scope_only_in_documents(detail: Dict[str, Any], enriched: Dict[str, Any]) -> bool:
+    """Return True when SIMAP exposes criteria/scope only via external documents."""
+    criteria = detail.get("criteria") or {}
+    document_flags = (
+        detail.get("qualificationCriteriaInDocuments"),
+        detail.get("awardCriteriaInDocuments"),
+        criteria.get("qualificationCriteriaInDocuments"),
+        criteria.get("awardCriteriaInDocuments"),
+        criteria.get("qualificationCriteriaSelection") == "criteria_in_documents",
+        criteria.get("awardCriteriaSelection") == "criteria_in_documents",
+        enriched.get("qualificationCriteriaInDocuments"),
+        enriched.get("awardCriteriaInDocuments"),
+    )
+    has_direct_criteria = bool(
+        detail.get("qualificationCriteria")
+        or detail.get("awardCriteria")
+        or criteria.get("qualificationCriteria")
+        or criteria.get("awardCriteria")
+        or enriched.get("qualificationCriteria")
+        or enriched.get("awardCriteria")
+    )
+    return any(value is True for value in document_flags) and not has_direct_criteria
