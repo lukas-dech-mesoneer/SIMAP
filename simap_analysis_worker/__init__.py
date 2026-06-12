@@ -11,6 +11,7 @@ from simap_agent.detail_analysis import (
     run_detail_analysis,
     save_analysis_result,
     update_analysis_request_message,
+    update_analysis_status_started,
 )
 
 
@@ -18,6 +19,11 @@ def main(msg: func.QueueMessage) -> None:
     """Run detail analysis for a queued Slack request."""
     request = _parse_queue_message(msg)
     logging.info("Starting SIMAP detail analysis: %s", request)
+    try:
+        started = update_analysis_status_started(request)
+        logging.info("Analysis started status update sent: %s", started)
+    except Exception:
+        logging.exception("Could not update analysis status to started")
     try:
         analysis = run_detail_analysis(request)
     except Exception as exc:

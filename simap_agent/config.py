@@ -44,10 +44,8 @@ CPV_CODES = os.getenv("CPV_CODES", "48000000,72000000").split(",")
 APPLY_SCORE_THRESHOLD = int(os.getenv("APPLY_SCORE_THRESHOLD", "6"))
 
 _default_posted_projects_file = "posted_projects.json"
-if os.getenv("FUNCTIONS_WORKER_RUNTIME") and os.getenv("HOME"):
-    _default_posted_projects_file = os.path.join(
-        os.getenv("HOME", ""), "data", "posted_projects.json"
-    )
+if os.getenv("FUNCTIONS_WORKER_RUNTIME"):
+    _default_posted_projects_file = "azure://simap-state/posted_projects.json"
 POSTED_PROJECTS_FILE = os.getenv("POSTED_PROJECTS_FILE", _default_posted_projects_file)
 DEDUPLICATION_SCOPE = os.getenv("DEDUPLICATION_SCOPE", "project")
 POSTED_PROJECTS_RETENTION_DAYS = int(os.getenv("POSTED_PROJECTS_RETENTION_DAYS", "365"))

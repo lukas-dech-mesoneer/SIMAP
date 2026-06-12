@@ -240,17 +240,22 @@ def relevance_adjustment(detail: Dict[str, Any], enriched: Dict[str, Any]) -> Di
     text = project_text(detail, enriched)
     reasons: List[str] = []
     disqualifiers: List[str] = []
-    adjustment = 0
+    positive_adj = 0
+    negative_adj = 0
 
     for label, patterns, points in POSITIVE_SIGNALS:
         if _matches(text, patterns):
             reasons.append(label)
-            adjustment += points
+            positive_adj += points
 
     for label, patterns, points in NEGATIVE_SIGNALS:
         if _matches(text, patterns):
             disqualifiers.append(label)
-            adjustment += points
+            negative_adj += points
+
+    # Cap positive stacking at +6 so keyword abundance can't push a weak project to 10.
+    # Negative signals are not capped — a clear no-go should always pull the score down.
+    adjustment = min(positive_adj, 6) + negative_adj
 
     return {
         "score_adjustment": adjustment,
@@ -295,7 +300,7 @@ def _dedupe(values: Iterable[str]) -> List[str]:
 
 
 def _map_labels(values: Iterable[str], labels: Dict[str, str]) -> List[str]:
-    return _dedupe(labels.get(value, value) for value in values)
+    return _dedupe(labels[value] for value in values if value in labels)
 
 
 def _recommendation(score: int, risks: List[str]) -> str:
@@ -328,19 +333,30 @@ def _decision_note(result: Dict[str, Any]) -> str:
     return "Wenig klare Mesoneer-Signale gefunden."
 
 
+_STRONG_FIT_SIGNALS = {
+    "Mesoneer core domain",
+    "Workflow/process automation",
+    "Data/AI scope",
+    "Custom engineering/integration",
+}
+
+
 def _apply_caps(score: int, fit_reasons: List[str], disqualifiers: List[str]) -> int:
     """Prevent weak-fit procurement types from passing due to broad IT terms."""
     disqualifier_set = set(disqualifiers)
     fit_reason_set = set(fit_reasons)
+    has_strong_fit = bool(_STRONG_FIT_SIGNALS & fit_reason_set)
 
+    # Procurement-only: cap at 5 even without operations signal.
+    # Requires a concrete engineering/AI/core-domain signal to exceed this.
+    if "Pure license/subscription procurement" in disqualifier_set and not has_strong_fit:
+        score = min(score, 5)
+
+    # Procurement + operations with no engineering counter-signal: hard cap at 4.
     if {
         "Pure license/subscription procurement",
         "Operations/support-heavy scope",
-    }.issubset(disqualifier_set) and not (
-        "Workflow/process automation" in fit_reason_set
-        or "Data/AI scope" in fit_reason_set
-        or "Mesoneer core domain" in fit_reason_set
-    ):
+    }.issubset(disqualifier_set) and not has_strong_fit:
         score = min(score, 4)
 
     if "Infrastructure/hardware scope" in disqualifier_set:

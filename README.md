@@ -41,6 +41,7 @@ Empfohlene Azure Function App Settings:
 - `OPENAI_API_VERSION`: API-Version, Standard `2024-12-01-preview`.
 - `CPV_CODES`: Kommagetrennte CPV-Codes, Standard `48000000,72000000`.
 - `APPLY_SCORE_THRESHOLD`: Mindestscore fuer Slack-Posts, Standard `6`.
+- `POSTED_PROJECTS_FILE`: Deduplikationsspeicher. Lokal Standard `posted_projects.json`, in Azure Functions Standard `azure://simap-state/posted_projects.json`.
 - `POSTED_PROJECTS_RETENTION_DAYS`: Aufbewahrung fuer Deduplikationskeys, Standard `365`.
 - `DEDUPLICATION_SCOPE`: `project` oder `publication`, Standard `project`.
 - `INTERNAL_REFERENCE_PACK_FILE`: Pfad zum internen Referenz-Pack, Standard `internal_reference_pack.md`.
@@ -54,7 +55,7 @@ Diese beiden Test-Modi sollten in Produktion deaktiviert bleiben, weil sie den T
 
 ## Deduplikation und Storage
 
-Bereits erfolgreich an Slack gesendete SIMAP-Projekte werden in `POSTED_PROJECTS_FILE` gespeichert. Lokal ist der Standard `posted_projects.json`; in Azure Functions wird standardmaessig `$HOME/data/posted_projects.json` verwendet. Standardmaessig wird per `projectId` dedupliziert. Mit `DEDUPLICATION_SCOPE=publication` kann jede neue SIMAP-Publikation eines Projekts separat gepostet werden.
+Bereits erfolgreich an Slack gesendete SIMAP-Projekte werden in `POSTED_PROJECTS_FILE` gespeichert. Lokal ist der Standard `posted_projects.json`; in Azure Functions wird standardmaessig Azure Blob Storage unter `azure://simap-state/posted_projects.json` verwendet. Standardmaessig wird per `projectId` dedupliziert. Mit `DEDUPLICATION_SCOPE=publication` kann jede neue SIMAP-Publikation eines Projekts separat gepostet werden.
 
 Gepostete Projektkontexte werden in Azure Blob Storage unter `simap-projects/<project_id>.json` abgelegt. Detailanalysen werden im Container `simap-analysis-results` als JSON, HTML und DOCX gespeichert.
 

@@ -76,35 +76,42 @@ def format_slack_blocks(proj: Dict[str, Any]) -> List[Dict[str, Any]]:
     cpv_code = cpv.get("code", "-")
     cpv_label = cpv.get("label_de", "-")
     missing = proj.get("missing_info") or []
-    fit_reasons = proj.get("fit_reason_labels") or proj.get("fit_reasons") or []
-    risk_labels = proj.get("risk_labels") or proj.get("disqualifiers") or []
+    fit_reasons = proj.get("fit_reason_labels") or []
+    risk_labels = proj.get("risk_labels") or []
     document_insights = proj.get("document_insights") or []
     recommendation = proj.get("recommendation") or "Pruefen"
-    decision_note = proj.get("decision_note")
 
     offer_dl = fmt_date(offer_dl_raw, "%d.%m.%Y")
     qa_dl = fmt_date(qa_dl_raw, "%d.%m.%Y")
     start = fmt_date(start_raw, "%d.%m.%Y")
 
+    date_parts = []
+    if qa_dl != "-":
+        date_parts.append(f"Q&A: {qa_dl}")
+    if offer_dl != "-":
+        date_parts.append(f"Frist: {offer_dl}")
+    if start != "-":
+        date_parts.append(f"Start: {start}")
+    dates = " · ".join(date_parts) or "-"
+
     main_text = (
-        f"\n:rocket: *Team: {team}*  *#{project_number}*\n"
-        f"\n:file_folder: *Projekt:* {title} / {customer}\n"
-        f"\n:star: *Fit:* *{score}/10*   *{recommendation}*\n"
-        f"\n:page_facing_up: *Zusammenfassung:*\n>{summary}\n\n"
-        f":calendar:   -   *Q&A:* {qa_dl}   -   *Frist:* {offer_dl}   -   *Start:* {start}\n"
-        f"\n:pushpin: *CPV:* `{cpv_code}` - {cpv_label}\n"
+        f":rocket: *#{project_number} · {team}*\n"
+        f"*{title}*\n"
+        f"{customer}\n"
+        f"\n:star: *{score}/10 — {recommendation}*\n"
+        f"{truncate_text(summary, 500)}\n"
+        f"\n:calendar: {dates}\n"
+        f":pushpin: `{cpv_code}` {cpv_label}\n"
     )
 
-    if decision_note:
-        main_text += f"\n:dart: *Einschaetzung:* {decision_note}\n"
     if fit_reasons:
-        main_text += f"\n:white_check_mark: *Fit-Signale:* {join_items(fit_reasons)}\n"
+        main_text += f"\n:white_check_mark: {' · '.join(fit_reasons[:3])}\n"
     if risk_labels:
-        main_text += f"\n:warning: *Risiken/Abzuege:* {join_items(risk_labels)}\n"
+        main_text += f":warning: {' · '.join(risk_labels[:3])}\n"
     if document_insights:
-        main_text += f"\n:bookmark: *Dokumente/Kriterien:* {join_items(document_insights, 5)}\n"
+        main_text += f":bookmark: {', '.join(document_insights[:3])}\n"
     if missing:
-        main_text += f"\n:mag: *Fehlende Infos:* {join_items(missing, 6)}\n"
+        main_text += f":mag: Fehlend: {', '.join(missing[:4])}\n"
 
     criteria_text = _criteria_text(proj)
 
@@ -164,15 +171,17 @@ def format_slack_blocks(proj: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _criteria_text(proj: Dict[str, Any]) -> str:
+    """Return criteria details only when actual items are available.
+
+    Skips "see external docs" summaries — those are already captured in
+    document_insights on the main card. Only shows content when real
+    criteria items or a genuine summary are present.
+    """
     text = ""
     qual_summary = proj.get("qualificationCriteriaSummary")
     qual = proj.get("qualificationCriteria") or []
-    qual_in_docs = _truthy_flag(proj.get("qualificationCriteriaInDocuments"))
-    qual_as_pdf = _truthy_flag(proj.get("qualificationCriteriaAsPDF"))
 
-    if qual_summary:
-        text += f"\n:bookmark_tabs: *Eignungskriterien:*\n{qual_summary}\n"
-    elif qual:
+    if qual:
         text += ":bookmark_tabs: *Eignungskriterien:*"
         for criteria in qual:
             title = (criteria.get("title") or {}).get("de")
@@ -183,19 +192,13 @@ def _criteria_text(proj: Dict[str, Any]) -> str:
             if desc:
                 text += f" - {desc}"
         text += "\n"
-    elif qual_as_pdf:
-        text += ":bookmark_tabs: *Eignungskriterien:*\nKriterien sind als PDF hinterlegt\n"
-    elif qual_in_docs:
-        text += ":bookmark_tabs: *Eignungskriterien:*\nKriterien sind in den Dokumenten hinterlegt\n"
+    elif qual_summary and not _is_external_reference(qual_summary):
+        text += f"\n:bookmark_tabs: *Eignungskriterien:*\n{qual_summary}\n"
 
     award_summary = proj.get("awardCriteriaSummary")
     award = proj.get("awardCriteria") or []
-    award_in_docs = _truthy_flag(proj.get("awardCriteriaInDocuments"))
-    award_as_pdf = _truthy_flag(proj.get("awardCriteriaAsPDF"))
 
-    if award_summary:
-        text += f"\n:trophy: *Zuschlagskriterien:*\n{award_summary}\n"
-    elif award:
+    if award:
         text += ":trophy: *Zuschlagskriterien:*"
         for criteria in award:
             title = (criteria.get("title") or {}).get("de")
@@ -206,20 +209,16 @@ def _criteria_text(proj: Dict[str, Any]) -> str:
             if weight is not None:
                 text += f" - Gewichtung {weight}%"
         text += "\n"
-    elif award_as_pdf:
-        text += ":trophy: *Zuschlagskriterien:*\nKriterien sind als PDF hinterlegt\n"
-    elif award_in_docs:
-        text += ":trophy: *Zuschlagskriterien:*\nKriterien sind in den Dokumenten hinterlegt\n"
+    elif award_summary and not _is_external_reference(award_summary):
+        text += f"\n:trophy: *Zuschlagskriterien:*\n{award_summary}\n"
 
     return text.strip()
 
 
-def _truthy_flag(value: Any) -> bool:
-    if value is True:
-        return True
-    if not isinstance(value, str):
-        return False
-    return value.lower() in {"yes", "true", "criteria_in_documents", "criteria_as_pdf"}
+def _is_external_reference(text: str) -> bool:
+    """Return True when criteria text just points to an external document."""
+    t = text.lower()
+    return "http" in t or "suisseoffer" in t or t.startswith("siehe")
 
 
 def post_blocks(blocks: List[Dict[str, Any]]) -> None:
@@ -241,8 +240,3 @@ def post_blocks(blocks: List[Dict[str, Any]]) -> None:
     response.raise_for_status()
 
 
-def post_message(text: str) -> None:
-    logger.debug("Sending Slack message")
-    response = requests.post(config.SLACK_WEBHOOK_URL, json={"text": text}, timeout=10)
-    logger.debug("Slack response status: %s", response.status_code)
-    response.raise_for_status()

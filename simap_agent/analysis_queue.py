@@ -13,8 +13,8 @@ def build_analysis_request(interaction: dict[str, Any]) -> dict[str, Any]:
     user = interaction.get("user") or {}
     channel = interaction.get("channel") or {}
     message = interaction.get("message") or {}
-    channel_id = channel.get("id") or project.get("_origin_channel_id")
-    thread_ts = project.get("_origin_thread_ts") or message.get("thread_ts") or message.get("ts")
+    # thread_ts: for thread replies, message.thread_ts is the parent (original project message)
+    thread_ts = message.get("thread_ts") or message.get("ts")
     return {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "project_id": project.get("project_id"),
@@ -23,16 +23,11 @@ def build_analysis_request(interaction: dict[str, Any]) -> dict[str, Any]:
         "qna_deadline": project.get("qna_deadline"),
         "contract_start": project.get("contract_start"),
         "slack_user_id": user.get("id"),
-        "slack_channel_id": channel_id,
+        "slack_channel_id": channel.get("id"),
         "slack_channel_name": channel.get("name"),
         "slack_thread_ts": thread_ts,
         "slack_message_ts": message.get("ts"),
+        "response_url": interaction.get("response_url"),
     }
 
 
-def enqueue_analysis_request(interaction: dict[str, Any]) -> dict[str, Any]:
-    from simap_agent.azure_storage import enqueue_json
-
-    message = build_analysis_request(interaction)
-    enqueue_json(ANALYSIS_QUEUE_NAME, message)
-    return message

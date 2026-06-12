@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 from simap_agent import config
 from simap_agent.analysis_report import (
@@ -23,11 +26,15 @@ from simap_agent.project_store import load_project_context
 ANALYSIS_RESULT_CONTAINER = "simap-analysis-results"
 
 
-def run_detail_analysis(request: dict[str, Any]) -> dict[str, Any] | str:
+def run_detail_analysis(request: dict[str, Any]) -> dict[str, Any]:
     """Return a structured German analysis for a queued SIMAP project."""
     project_id = request.get("project_id")
-    context = load_project_context(project_id) if project_id else None
+    if not project_id:
+        logger.warning("run_detail_analysis: no project_id in request %s", request)
+        return _missing_context_analysis(request)
+    context = load_project_context(project_id)
     if not context:
+        logger.warning("run_detail_analysis: no context found for project_id=%s", project_id)
         return _missing_context_analysis(request)
 
     report_request = _request_with_context_metadata(request, context)
@@ -145,22 +152,47 @@ def save_analysis_result(
     return links
 
 
-def update_analysis_request_message(request: dict[str, Any], analysis_posted: bool) -> bool:
-    """Replace the analysis button message with a final status message."""
+def update_analysis_status_started(request: dict[str, Any]) -> bool:
+    """Update the 'Analyse starten' button message to show analysis is running.
+
+    Preserves the original 'X findet Projekt interessant' context and removes
+    the button so users cannot trigger a duplicate analysis.
+    """
     token = os.getenv("SLACK_BOT_TOKEN")
     channel_id = request.get("slack_channel_id")
     message_ts = request.get("slack_message_ts")
     if not token or not channel_id or not message_ts:
         return False
 
-    project_number = request.get("project_number") or request.get("project_id") or "unbekannt"
+    text = _analysis_status_text(request, ":hourglass_flowing_sand: Analyse laeuft ... (ca. 2-3 Minuten)")
+    return _slack_update_message(token, channel_id, message_ts, text)
+
+
+def update_analysis_request_message(request: dict[str, Any], analysis_posted: bool) -> bool:
+    """Update the analysis prompt message with the final status (no button)."""
+    token = os.getenv("SLACK_BOT_TOKEN")
+    channel_id = request.get("slack_channel_id")
+    message_ts = request.get("slack_message_ts")
+    if not token or not channel_id or not message_ts:
+        return False
+
     if analysis_posted:
-        text = f"Detailanalyse fuer Projekt #{project_number} ist abgeschlossen."
+        status = ":white_check_mark: Detailanalyse abgeschlossen — Ergebnisse sind als Antwort gepostet."
     else:
-        text = (
-            f"Detailanalyse fuer Projekt #{project_number} wurde verarbeitet, "
-            "konnte aber nicht in Slack gepostet werden. Bitte Logs pruefen."
-        )
+        status = ":warning: Analyse verarbeitet, konnte aber nicht in Slack gepostet werden. Bitte Logs pruefen."
+    text = _analysis_status_text(request, status)
+    return _slack_update_message(token, channel_id, message_ts, text)
+
+
+def _analysis_status_text(request: dict[str, Any], status_line: str) -> str:
+    """Build a status message that preserves the 'X findet Projekt interessant' header."""
+    user_id = request.get("slack_user_id")
+    project_number = request.get("project_number") or request.get("project_id") or "unbekannt"
+    actor = f"<@{user_id}>" if user_id else "Jemand"
+    return f"{actor} findet Projekt *#{project_number}* interessant.\n{status_line}"
+
+
+def _slack_update_message(token: str, channel_id: str, message_ts: str, text: str) -> bool:
     payload = {
         "channel": channel_id,
         "ts": message_ts,
@@ -287,13 +319,21 @@ def _request_with_context_metadata(
     return result
 
 
-def _missing_context_analysis(request: dict[str, Any]) -> str:
+def _missing_context_analysis(request: dict[str, Any]) -> dict[str, Any]:
     project_number = request.get("project_number") or request.get("project_id") or "unbekannt"
-    return (
-        f"*Detailanalyse Projekt #{project_number}*\n\n"
-        "Der Analyse-Job wurde gestartet, aber der gespeicherte Projektkontext wurde nicht gefunden. "
-        "Bitte die Ausschreibung mit der aktuellen Version erneut posten und danach `Analyse starten` klicken."
-    )
+    return {
+        "title": f"SCOTSMAN Bid-Qualifizierung Projekt #{project_number}",
+        "decision": "ACTION REQUIRED",
+        "total_score": 0,
+        "decision_reason": (
+            "Kein gespeicherter Projektkontext gefunden. "
+            "Bitte Ausschreibung erneut posten und dann 'Analyse starten' klicken."
+        ),
+        "scorecard": [],
+        "internal_evidence": [],
+        "contacts": [],
+        "next_steps": ["Ausschreibung erneut posten, dann 'Analyse starten' klicken."],
+    }
 
 
 def _truncate_for_slack(text: str, limit: int = 2900) -> str:

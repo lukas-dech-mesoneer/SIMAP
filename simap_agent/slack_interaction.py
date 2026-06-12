@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from typing import Any
@@ -13,6 +14,8 @@ from urllib.parse import parse_qs
 INTERESTING_ACTION_ID = "simap_project_interesting"
 NOT_INTERESTING_ACTION_ID = "simap_project_not_interesting"
 START_ANALYSIS_ACTION_ID = "simap_project_start_analysis"
+
+logger = logging.getLogger(__name__)
 
 
 def verify_slack_signature(
@@ -90,6 +93,7 @@ def post_thread_update(interaction: dict[str, Any]) -> bool:
 
     token = os.getenv("SLACK_BOT_TOKEN")
     if not token:
+        logger.warning("Skipping Slack thread update because SLACK_BOT_TOKEN is not configured")
         return False
 
     action_id = interaction.get("action_id")
@@ -98,6 +102,11 @@ def post_thread_update(interaction: dict[str, Any]) -> bool:
     message_ts = (interaction.get("message") or {}).get("ts")
     user_id = (interaction.get("user") or {}).get("id")
     if not channel_id or not message_ts:
+        logger.warning(
+            "Skipping Slack thread update because channel_id or message_ts is missing: channel_id=%s message_ts=%s",
+            channel_id,
+            message_ts,
+        )
         return False
 
     if action_id == INTERESTING_ACTION_ID:
@@ -119,8 +128,10 @@ def post_thread_update(interaction: dict[str, Any]) -> bool:
             else "Die Detailanalyse wurde gestartet. Das dauert ca. 2-3 Minuten.",
         )
     else:
+        logger.warning("Skipping Slack thread update for unsupported action_id=%s", action_id)
         return False
 
+    logger.info("Posting Slack thread update: action_id=%s channel=%s thread_ts=%s", action_id, channel_id, message_ts)
     response = requests.post(
         "https://slack.com/api/chat.postMessage",
         json=payload,
@@ -130,7 +141,7 @@ def post_thread_update(interaction: dict[str, Any]) -> bool:
     response.raise_for_status()
     data = response.json()
     if not data.get("ok"):
-        raise RuntimeError(f"Slack chat.postMessage failed: {data.get('error')}")
+        raise RuntimeError(f"Slack chat.postMessage failed: {data.get('error')} response={data}")
     return True
 
 
@@ -167,22 +178,6 @@ def _analysis_prompt_payload(
                     }
                 ],
             },
-        ],
-    }
-
-
-def _start_analysis_actions_block(project_number: str, project: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "type": "actions",
-        "block_id": f"simap_analysis_actions_{project_number}",
-        "elements": [
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "Analyse starten", "emoji": True},
-                "style": "primary",
-                "value": json.dumps(project, separators=(",", ":")),
-                "action_id": START_ANALYSIS_ACTION_ID,
-            }
         ],
     }
 

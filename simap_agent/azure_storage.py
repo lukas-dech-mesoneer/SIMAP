@@ -9,7 +9,6 @@ from typing import Any
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContentSettings, BlobSasPermissions, generate_blob_sas
-from azure.storage.queue import QueueClient, TextBase64EncodePolicy
 
 
 def connection_string() -> str:
@@ -84,20 +83,6 @@ def get_json_blob(container: str, blob_name: str) -> dict[str, Any] | None:
     except ResourceNotFoundError:
         return None
     return json.loads(data.decode("utf-8"))
-
-
-def enqueue_json(queue_name: str, message: dict[str, Any]) -> None:
-    """Send a JSON message to an Azure Storage Queue."""
-    queue = QueueClient.from_connection_string(
-        connection_string(),
-        queue_name=queue_name,
-        message_encode_policy=TextBase64EncodePolicy(),
-    )
-    try:
-        queue.create_queue()
-    except ResourceExistsError:
-        pass
-    queue.send_message(json.dumps(message, separators=(",", ":")))
 
 
 def _blob_service() -> BlobServiceClient:

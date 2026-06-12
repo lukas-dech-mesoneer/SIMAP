@@ -622,6 +622,33 @@ def test_main_skips_already_posted_summary(monkeypatch, tmp_path):
     assert fetched == [{"id": "2", "publicationId": "p2"}]
 
 
+def test_main_skips_duplicate_summaries_in_same_run(monkeypatch, tmp_path):
+    posted_file = tmp_path / "posted_projects.json"
+    fetched = []
+
+    monkeypatch.setattr(main.config, "POSTED_PROJECTS_FILE", str(posted_file))
+    monkeypatch.setattr(main.config, "REPOST_ALREADY_POSTED", False)
+    monkeypatch.setattr(main.config, "DEDUPLICATION_SCOPE", "project")
+    monkeypatch.setattr(
+        main,
+        "fetch_project_summaries",
+        lambda cpv=None: [
+            {"id": "1", "publicationId": "p1"},
+            {"id": "1", "publicationId": "p2"},
+            {"id": "2", "publicationId": "p3"},
+        ],
+    )
+    monkeypatch.setattr(main, "fetch_project_details", lambda summaries: fetched.extend(summaries) or [])
+    monkeypatch.setattr(main, "enrich_batch", lambda details, profile: [])
+
+    main.main()
+
+    assert fetched == [
+        {"id": "1", "publicationId": "p1"},
+        {"id": "2", "publicationId": "p3"},
+    ]
+
+
 def test_main_can_repost_already_posted_summary(monkeypatch, tmp_path):
     posted_file = tmp_path / "posted_projects.json"
     posted_store.save_posted_keys(str(posted_file), {"1"})
@@ -712,6 +739,40 @@ def test_posted_store_prunes_entries_older_than_retention():
         "fresh": "2025-12-31T00:00:00+00:00",
         "legacy-without-date": None,
     }
+
+
+def test_posted_store_supports_azure_blob_paths(monkeypatch):
+    stored = {}
+
+    def fake_get_json_blob(container, blob_name):
+        assert container == "simap-state"
+        assert blob_name == "posted_projects.json"
+        return stored.get((container, blob_name))
+
+    def fake_put_json_blob(container, blob_name, data):
+        stored[(container, blob_name)] = data
+
+    monkeypatch.setattr(posted_store, "get_json_blob", fake_get_json_blob)
+    monkeypatch.setattr(posted_store, "put_json_blob", fake_put_json_blob)
+
+    path = "azure://simap-state/posted_projects.json"
+    posted_store.save_posted_keys(path, {"1", "2"})
+
+    assert posted_store.load_posted_keys(path) == {"1", "2"}
+    assert set(stored[("simap-state", "posted_projects.json")]["posted_keys"]) == {"1", "2"}
+
+
+def test_posted_store_falls_back_to_legacy_azure_function_file(monkeypatch, tmp_path):
+    legacy_file = tmp_path / "home" / "data" / "posted_projects.json"
+    posted_store.save_posted_keys(str(legacy_file), {"legacy"})
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("POSTED_PROJECTS_LEGACY_FILE", raising=False)
+    monkeypatch.setattr(posted_store, "get_json_blob", lambda container, blob_name: None)
+
+    path = "azure://simap-state/posted_projects.json"
+
+    assert posted_store.load_posted_keys(path) == {"legacy"}
 
 
 def test_detail_analysis_prompt_includes_internal_reference_pack(tmp_path, monkeypatch):

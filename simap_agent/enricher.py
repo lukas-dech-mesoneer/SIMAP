@@ -44,10 +44,11 @@ ENRICH_FUNC = [
     {
         "name": "enrich_project",
         "description": (
-            "Analysiere ein SIMAP-Projekt, fasse es kurz zusammen, "
-            "extrahiere nur deutsche Werte, ordne es einem Team zu "
-            "(Products, Engineering, Data&AI), gib einen Apply-Score 1–10 wie sehr das Projekt aus basis unserer Skills zu uns passen würde (1 garnicht - 10 wir sind ein fit) "
-            "und liste fehlende Felder als MissingInfo auf."
+            "Analysiere ein SIMAP-Projekt: kurze Zusammenfassung, deutsche Felder extrahieren, "
+            "Team zuordnen (Products, Engineering, Data&AI), "
+            "Apply-Score 1-10 vergeben (1=klar irrelevant, 5=unklar/extern, 6=prüfenswert mit Engineering-Anteil, "
+            "7-8=guter Fit, 9-10=sehr starker Fit; max. 5 wenn Kriterien nur extern einsehbar, max. 4 bei reiner Lizenz-/Supportbeschaffung), "
+            "fehlende Felder als MissingInfo auflisten."
         ),
         "parameters": {
             "type": "object",
@@ -165,16 +166,19 @@ def _build_document_insights(detail: Dict[str, Any], data: Dict[str, Any]) -> Li
 def enrich(detail: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
     """Enrich a single project using OpenAI."""
     system_content = (
-        "Du bist RFP-Analyst fuer Mesoneer ag. Nutze nur deutsche Felder und analysiere wie folgt:\n"
-        "1. Zusammenfassung (2-3 Saetze)\n"
-        "2. Extrahiere relevante Felder\n"
-        "3. Teamzuordnung\n"
-        "4. Apply-Score 1-10 - (Wie interessant wäre die Bewerbung vin Aus 1 nicht relevant, 10 Sehr sehr guter Fit für uns)\n"
-        "5. Liste fehlende Felder\n"
-        "Bewerte streng: Score 7+ nur wenn Entwicklung, Integration, Workflow/Data/AI oder digitale Identifikation klarer Leistungsbestandteil ist.\n"
-        "Reine Lizenz-, Subscription-, Hardware-, Infrastruktur-, Hosting-, Betriebs- oder Supportbeschaffungen maximal mit Score 4 bewerten, ausser es gibt einen klaren Engineering-/Integrationsanteil.\n"
-        "Projekte mit spezifischen Vendor-Partnerstufen oder Zertifizierungen kritisch tiefer bewerten, wenn diese als Muss-Kriterium erscheinen.\n"
-        "Gib kurze fit_reasons und disqualifiers zur Score-Erklaerung aus."
+        "Du bist RFP-Analyst fuer Mesoneer AG. Analysiere streng und vergib den Apply-Score nach dieser Skala:\n"
+        "1-2 = klar nicht relevant (falsche Branche, Hardware, reine Infrastruktur)\n"
+        "3-4 = schwacher Fit (Lizenz-/Subscription-Beschaffung, reine Wartung/Betrieb/Support)\n"
+        "5   = unklar oder grenzwertig (Kriterien extern, Leistungsumfang nicht beurteilbar)\n"
+        "6   = prüfenswert mit konkretem Entwicklungs- oder Integrationsanteil\n"
+        "7-8 = guter Fit (Softwareentwicklung, Workflow, Data/AI, digitale Identifikation klar beschrieben)\n"
+        "9-10 = sehr starker Fit mit mehreren nachgewiesenen Mesoneer-Staerken\n\n"
+        "Strikte Regeln:\n"
+        "- Score 7+ nur wenn Entwicklung, Integration, Workflow/Data/AI oder digitale Identifikation als expliziter Leistungsbestandteil genannt ist.\n"
+        "- Sind Leistungsumfang, Eignungs- und Zuschlagskriterien nur in externen Unterlagen: max. Score 5.\n"
+        "- Reine Lizenz-, Subscription-, Hardware-, Hosting-, Betriebs- oder Supportbeschaffungen: max. Score 4.\n"
+        "- Vendor-Partnerstufen oder Zertifizierungen als Muss-Kriterium: Score reduzieren.\n"
+        "Gib kurze fit_reasons und disqualifiers zur Score-Begruendung aus."
     )
     logger.debug("Calling OpenAI for project %s", detail.get("id"))
     resp = openai_client.chat.completions.create(

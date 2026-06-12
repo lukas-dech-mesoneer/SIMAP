@@ -49,12 +49,15 @@ def main() -> None:
         new_summaries = summaries
     else:
         new_summaries = []
+        seen_keys = set(posted_keys)
         for summary in summaries:
             key = deduplication_key(summary, config.DEDUPLICATION_SCOPE)
-            if key and key in posted_keys:
+            if key and key in seen_keys:
                 logger.info("Skipping already posted %s %s", config.DEDUPLICATION_SCOPE, key)
                 continue
             new_summaries.append(summary)
+            if key:
+                seen_keys.add(key)
         logger.debug("Filtered %d already posted summaries", len(summaries) - len(new_summaries))
 
     details = fetch_project_details(new_summaries)
