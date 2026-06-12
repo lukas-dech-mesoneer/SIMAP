@@ -19,14 +19,18 @@ DEFAULT_CONTAINER = "simap-feedback"
 DEFAULT_BLOB = "feedback.jsonl"
 
 
-def build_feedback_record(interaction: dict[str, Any]) -> dict[str, Any]:
+def build_feedback_record(
+    interaction: dict[str, Any],
+    enriched: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return a normalized feedback record for storage."""
     action_id = interaction.get("action_id")
     project = interaction.get("project") or {}
     user = interaction.get("user") or {}
     channel = interaction.get("channel") or {}
     message = interaction.get("message") or {}
-    return {
+
+    record: dict[str, Any] = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "event_type": _event_type(action_id),
         "action_id": action_id,
@@ -39,6 +43,18 @@ def build_feedback_record(interaction: dict[str, Any]) -> dict[str, Any]:
         "slack_message_ts": message.get("ts"),
         "response_url_present": bool(interaction.get("response_url")),
     }
+
+    if enriched:
+        pr = enriched.get("project") or {}
+        cpv = pr.get("cpvCode") or {}
+        record["apply_score"] = enriched.get("apply_score")
+        record["team"] = enriched.get("team")
+        record["title_de"] = pr.get("title_de")
+        record["cpv_code"] = cpv.get("code")
+        record["cpv_label"] = cpv.get("label_de")
+        record["recommendation"] = enriched.get("recommendation")
+
+    return record
 
 
 def save_feedback_record(record: dict[str, Any]) -> None:

@@ -28,15 +28,19 @@ def main(msg: func.QueueMessage) -> None:
         interaction.get("project"),
         (interaction.get("user") or {}).get("id"),
     )
+    project_id = (interaction.get("project") or {}).get("project_id")
+    context = load_project_context(project_id) if project_id else None
+    enriched = (context or {}).get("enriched")
+
     try:
-        record = build_feedback_record(interaction)
+        record = build_feedback_record(interaction, enriched)
         save_feedback_record(record)
         logging.info("Stored Slack feedback: %s", record)
     except Exception:
         logging.exception("Could not store Slack feedback")
 
     try:
-        _replace_buttons_with_status(interaction)
+        _replace_buttons_with_status(interaction, enriched)
     except Exception:
         logging.exception("Could not update project message to remove buttons")
 
@@ -47,7 +51,7 @@ def main(msg: func.QueueMessage) -> None:
         logging.exception("Could not post Slack thread update")
 
 
-def _replace_buttons_with_status(interaction: dict[str, Any]) -> bool:
+def _replace_buttons_with_status(interaction: dict[str, Any], enriched: dict[str, Any] | None = None) -> bool:
     """Update the original project message: replace action buttons with a feedback status line."""
     action_id = interaction.get("action_id")
     if action_id not in (INTERESTING_ACTION_ID, NOT_INTERESTING_ACTION_ID):
@@ -66,10 +70,6 @@ def _replace_buttons_with_status(interaction: dict[str, Any]) -> bool:
     else:
         status = f":x: {actor}: Nicht interessant"
 
-    # Rebuild blocks from stored project data, remove buttons, add status.
-    project_id = (interaction.get("project") or {}).get("project_id")
-    context = load_project_context(project_id) if project_id else None
-    enriched = (context or {}).get("enriched")
     if enriched:
         blocks = [b for b in format_slack_blocks(enriched) if b.get("type") != "actions"]
         status_block = {"type": "context", "elements": [{"type": "mrkdwn", "text": status}]}

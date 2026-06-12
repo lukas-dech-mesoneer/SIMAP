@@ -20,15 +20,14 @@ def connection_string() -> str:
 
 def append_jsonl(container: str, blob_name: str, record: dict[str, Any]) -> None:
     """Append a JSON line to an append blob."""
-    blob = _blob_service().get_blob_client(container=container, blob=blob_name)
     _ensure_container(container)
-    try:
-        blob.create_append_blob()
-    except ResourceExistsError:
-        pass
-
+    blob = _blob_service().get_blob_client(container=container, blob=blob_name)
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-    blob.append_block(line.encode("utf-8"))
+    try:
+        blob.append_block(line.encode("utf-8"))
+    except ResourceNotFoundError:
+        blob.create_append_blob()
+        blob.append_block(line.encode("utf-8"))
 
 
 def put_json_blob(container: str, blob_name: str, data: dict[str, Any]) -> None:
